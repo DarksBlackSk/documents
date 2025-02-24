@@ -3,41 +3,38 @@
 ```bash
 nmap -Pn -n -sS -p- --open -sCV --min-rate 5000 172.17.0.2
 ```
+![image](https://github.com/user-attachments/assets/920780b0-5fd2-437f-a025-0b2eea3a8987)
 
-![image](https://github.com/user-attachments/assets/1f313174-c9b0-4962-8a18-358873b3e4d1)
+observamos 2 servicios corriendo en el servidor, puerto 22 (ssh) y puerto 80 (http), asi que comienzo chequeando el servicio web 
 
-observams los puertos 22 y 80 levantados y vemos que el servicio web redirecciona al dominio `http://cybersec.dl` asi que lo agregamos al archivo `/etc/hosts`
+![image](https://github.com/user-attachments/assets/050a0fe6-b5e6-4e9c-866b-58a38b71b302)
 
-```bash
-echo '172.17.0.2 cybersec.dl' >> /etc/hosts
-```
+es la web de una empresa de ciberseguridad, si reviso el codigo fuente no observo comentarios o codigo vulnerable, solo observe una llamada a una api, que incluso si inspecciono la web se observa el llamado a la api, aunque esta parece ser la que genera las password "seguras" de ejemplo que muestra la web
 
-ahora chequeamos la web
+![image](https://github.com/user-attachments/assets/fafd54e0-41df-47b7-bc3f-427dccb055fe)
 
-![image](https://github.com/user-attachments/assets/93951116-7cf1-48f8-a2c5-7008f0f2d60e)
+![image](https://github.com/user-attachments/assets/4c9adf78-9be0-4780-981f-d88c999e3f94)
 
-resulta ser la web de una empresa de Ciberseguidad, inspecciono el codigo funete pero no observo nada, sin embago si inspeccionamos un poco mas veremos que hace uso de
-una `api`
-
-![image](https://github.com/user-attachments/assets/f3447ba9-5b85-4ed7-9cff-94693a375776)
-
-Parece ser que es un `api` que se encarga de generar las password que se muestran en la web, asi que tenemos por donde tirar y ver si conseguimos algo mas `http://cybersec.dl/api/...`
-por lo que hace fuzzing en este punto a ver si consigo algo mas
+puedo acceder pero no contiene mas informacion, por lo que chequeare si existen otras api's haciendo fuzzing 
 
 ```bash
-feroxbuster -u http://cybersec.dl/api/ -w /usr/share/wordlists/seclists/Discovery/Web-Content/directory-list-lowercase-2.3-medium.txt -x txt,php,bak,db,py,html,js,jpg,png,git,sh -t 200 --random-agent --no-state -d 5
+feroxbuster -u http://cybersec.dl/api -w /usr/share/wordlists/seclists/Discovery/Web-Content/directory-list-lowercase-2.3-medium.txt -x txt,php,bak,db,py,html,js,jpg,png,git,sh -t 200 --random-agent --no-state -d 5
 ```
 
-![image](https://github.com/user-attachments/assets/81cf5a72-a9db-40c3-9cfc-429bf6826ed7)
+![image](https://github.com/user-attachments/assets/0d35ce97-7e16-44c2-8d46-a1429669371f)
 
-sin mucho problema localizamos un punto final, asi que testeamos
+consigo `/api/login`, si intento acceder observo un error
 
-![image](https://github.com/user-attachments/assets/fb52d54c-df14-49c1-b841-322b89e77a1d)
+![image](https://github.com/user-attachments/assets/070fd0f1-0c0a-47e9-9555-b6ca61283228)
 
-vemos que nos dice metodo no permitido y es porque se envia una solicitud `GET` y espera una `POST`, para intentar autenticarme lo que hare sera un script en python
-que relice un ataque de diccionario contra la `api` a ver si consigo algo
+pero esto se debe a que se envia una peticion GET y no POST, lo podemos validar con `curl`
 
-```python
+![image](https://github.com/user-attachments/assets/1ad3623f-8d25-4646-bfcd-249a1a8c2fde)
+
+intentare hacer un ataque a la api, a ver si llego a localizar las credenciales, pero primero me creo una wordlist que contenga usuarios comunes como: admin, administrator y demas, para pasarlo al script junto con la wordlist rockyou para atacar la password...
+
+script de python
+```
 import requests
 import json
 
@@ -82,34 +79,28 @@ passwords = leer_wordlist(passwords_file)
 # Ejecutar el ataque de fuerza bruta
 brute_force_attack(usernames, passwords)
 ```
-creo la wordlist de usuarios comunes tales como `admin`, `administator`, `administrador`... y ejecuto el script
-
+y lanzo el ataque
 
 ```bash
 python3 brute-force-api.py
 ```
+![image](https://github.com/user-attachments/assets/cefcbbc4-d624-40a6-b41e-5e19842ca92d)
 
-![image](https://github.com/user-attachments/assets/5bacda20-73fc-43f7-ae90-c1de8786d5db)
+obtengo credenciales validas, asi que me autentico contra la api
 
-estaba muy debil las credenciales ya que se localizan con mucha rapidez, capturo una peticion con burpsuite
+![image](https://github.com/user-attachments/assets/51a612c8-6aba-4f03-a165-6b5460114399)
 
-![image](https://github.com/user-attachments/assets/1dd920df-b231-4262-9af9-8a518fb08c9a)
+lo de mayor interes son las url que se exponen, por lo que podria ir testeando una a una a ver que sale (ojo, para los subdominios hay que agregarlos al archivo /etc/hosts)
 
-la modifico para enviar las crdenciales obtenidas y observamos la informacion que devuelve
+me consigo con que solo 2 subdominios estan activos, los demas no existen
 
-![image](https://github.com/user-attachments/assets/0457875f-89de-46bd-9cdf-7e511bf02987)
+![image](https://github.com/user-attachments/assets/0769300c-e64e-4e6a-9826-1e96dbe5a92d)
 
-de la informacion extraida, lo mas interesante para nosotros es la `url` que se expone `http://cybersec.dl/555555555555509.txt` asi que accedemos al archivo txt
+los subdominios disponibles son: `http://0internal_down.cybersec.dl/` & `http://mail.cybersec.dl/`. En `http://mail.cybersec.dl/` despues de testear la web no tiene pinta de llegar a ser vulnerable, sin embargo en el otro subdominio si observo contenido, un txt y otro archivo que al descargar y leer el archivo observamos esto
 
-![image](https://github.com/user-attachments/assets/561156f7-b486-4379-b73e-4e5e715ae049)
+![image](https://github.com/user-attachments/assets/8f64b7bf-d60a-4cdc-8d00-552a3075f0cb)
 
-aqui ya podriamos tener 2 posibles usuarios, lo otro que resulta de interes es la referencia donde carga el binario > `bin` <, `bin` podria ser el directorio `/bin` en 
-linux asi como un posible directorio o subdirectorio, pero al testear no resulta ser un directorio asi que testeo agregando el subdominio `bin.cybersec.dl` al archivo
-`/etc/hosts` y logro acceder a un panel de descarga con lo que parece ser el binario del texto
-
-![image](https://github.com/user-attachments/assets/3c6db733-c0d8-4765-9fb6-a2fb9211259e)
-
-si descargo el binario y comienzo analizarlo, en principio no parece ser muy util
+por lo visto, la password de `flypsi` se encuentra dentro del binario `smashing`, si descargo el binario y comienzo analizarlo, en principio no parece ser muy util
 
 ![image](https://github.com/user-attachments/assets/1307bdf2-863e-4dea-84c8-ef512cd78a0d)
 
